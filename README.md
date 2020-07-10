@@ -13,6 +13,25 @@
 
 Helm-Vault stores private data from YAML files in Hashicorp Vault. Helm-Vault should be used if you want to publicize your YAML configuration files, without worrying about leaking secret information.
 
+**NOTE:** This project has been forked in order to modify the default behavior:
+
+- Instead of using a deliminator (e.g. 'changeme') a new syntax is introduced that provides the full path to the secret in Vault:
+
+For example in the given values file:
+```
+someConfig: value
+
+# Database config
+postgresql:
+  # The value will be fetched (or stored) in the given Vault's path:
+  password: vault_secret('secret/sysadmin/helm/myapp/PGPassword')
+```
+Encrypting the given values file will request input for the password to create (or update existing) in Vault at the 'secret/sysadmin/helm/myapp/PGPassword' path.
+
+Alternatively, decrypting the values file will fetch the secret from the given path.
+
+Hence, -vp has been removed (`--vaultpath`).
+
 ## Table of Contents
 
 - [Helm-Vault](#helm-vault)
