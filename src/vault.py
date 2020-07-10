@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-
-import re
-import ruamel.yaml
-import hvac
 import os
+import re
+import sys
+import hvac
 import argparse
 RawTextHelpFormatter = argparse.RawTextHelpFormatter
 import glob
-import sys
 import getpass
 import platform
 import subprocess
+import ruamel.yaml
 check_call = subprocess.check_call
 
 
@@ -20,6 +19,7 @@ if sys.version_info[:2] < (3, 7):
 
 COMMANDS = frozenset({'template',
                       'edit',
+                      'clean',
                       'install',
                       'diff',
                       'view',
@@ -35,76 +35,68 @@ def parse_args(args):
     # Help text
     parser = argparse.ArgumentParser(description=
     """Store secrets from Helm in Vault
-    \n
-    Requirements:
-    \n
-    Environment Variables:
-    \n
+
+    Required Environment Variables:
+
     VAULT_ADDR:     (The HTTP address of Vault, for example, http://localhost:8200)
     VAULT_TOKEN:    (The token used to authenticate with Vault)
     """, formatter_class=RawTextHelpFormatter)
+
     subparsers = parser.add_subparsers(dest="action", required=True)
 
     # Encrypt help
     encrypt = subparsers.add_parser("enc", help="Parse a YAML file and store user entered data in Vault")
     encrypt.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
-    encrypt.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
     encrypt.add_argument("-s", "--secret-file", type=str, help="File containing the secret for input. Must end in .yaml.dec")
-    encrypt.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Decrypt help
     decrypt = subparsers.add_parser("dec", help="Parse a YAML file and retrieve values from Vault")
     decrypt.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
-    decrypt.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    decrypt.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Clean help
     clean = subparsers.add_parser("clean", help="Remove decrypted files (in the current directory)")
     clean.add_argument("-f", "--file", type=str, help="The specific YAML file to be deleted, without .dec", dest="yaml_file")
-    clean.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # View Help
     view = subparsers.add_parser("view", help="View decrypted YAML file")
     view.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
-    view.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    view.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Edit Help
     edit = subparsers.add_parser("edit", help="Edit decrypted YAML file. DOES NOT CLEAN UP AUTOMATICALLY.")
     edit.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
-    edit.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    edit.add_argument("-e", "--editor", help="Editor name. Default: (Linux/MacOS) \"vi\" (Windows) \"notepad\"", const=True, nargs="?")
-    edit.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
+    edit.add_argument("-e", "--editor", help='Editor name. Default: (Linux/MacOS) "vi" (Windows) "notepad"', const=True, nargs="?")
 
     # Install Help
     install = subparsers.add_parser("install", help="Wrapper that decrypts YAML files before running helm install")
     install.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
-    install.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    install.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Template Help
-    template = subparsers.add_parser("template", help="Wrapper that decrypts YAML files before running helm install")
+    template = subparsers.add_parser("template", help="Wrapper that decrypts YAML files before running helm template")
     template.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
-    template.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    template.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Upgrade Help
-    upgrade = subparsers.add_parser("upgrade", help="Wrapper that decrypts YAML files before running helm install")
+    upgrade = subparsers.add_parser("upgrade", help="Wrapper that decrypts YAML files before running helm upgrade")
     upgrade.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
-    upgrade.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    upgrade.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Lint Help
-    lint = subparsers.add_parser("lint", help="Wrapper that decrypts YAML files before running helm install")
+    lint = subparsers.add_parser("lint", help="Wrapper that decrypts YAML files before running helm link")
     lint.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
-    lint.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    lint.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # Diff Help
     diff = subparsers.add_parser("diff", help="Wrapper that decrypts YAML files before running helm diff")
     diff.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
-    diff.add_argument("-kv", "--kvversion", choices=['v1', 'v2'], default='v1', type=str, help="The KV Version (v1, v2) Default: \"v1\"")
-    diff.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
+
+    # Add -kv argument to each one of these
+    for param in [diff, lint, upgrade, template, install, edit, view, decrypt, encrypt]:
+        param.add_argument("-kv", "--kvversion",
+                           choices=['v1', 'v2'],
+                           default='v1',
+                           type=str,
+                           help='The KV Version (v1, v2) Default: "v1"')
+        param.add_argument("-v", "--verbose",
+                           help="Verbose logs",
+                           const=True,
+                           nargs="?")
 
     return parser
 
@@ -257,8 +249,7 @@ def cleanup(args):
 # For example:
 # secret_data['mysql']['password'] = "secret"
 # value_from_path(secret_data, "/mysql/password") => returns "secret"
-def value_from_path(secret_data, path):
-    print("PATH %s" % path)
+def value_from_secret_data(secret_data, path):
     val = secret_data
     for key in path.split('/'):
         if not key:
@@ -266,38 +257,65 @@ def value_from_path(secret_data, path):
         if key in val.keys():
             val = val[key]
         else:
-            raise Exception(f"Missing secret value. Key {key} does not exist when retrieving value from path {path}")
+            raise Exception(f"Missing secret value. Key {key} does not exist when retrieving value for '{path}'")
     return val
 
-def dict_walker(data, args, envs, secret_data, path=None):
+
+def lookup_key_val(pos, caller, key, i=0):
+    for l in caller.split('.')[i:]:
+        if l not in pos:
+            print(f"Warning: cannot find '{l}' in the .yaml.dec file! Input manually or Ctrl-c to exit.")
+            return None
+        if key in pos[l]:
+            return pos[l][key]
+        return lookup_key_val(pos[l], caller, key, i+1)
+
+
+def get_input(path):
+    return getpass.getpass(f"Input a value for '{path}': ")
+
+
+def dict_walker(data, args, envs, secret_data, path=None, caller=None):
+
     # Walk through the loaded dicts looking for the values we want
     path = path if path is not None else ""
     action = args.action
-
     if isinstance(data, dict):
         for key, value in data.items():
-            if m := re.match(r"^vault_secret\('(.*)'\)", str(value)):
+            if m := re.match(r'vault_secret\([\'"](.*?)[\'"]\)', str(value)):
                 path = m.group(1)
+
                 if args.verbose is True:
                     print(f"Found key/value to process: {key}={value}")
+
                 if action == "enc":
                     if secret_data:
-                        data[key] = value_from_path(secret_data, f"{path}")
+                        if caller is None:
+                            data[key] = secret_data[key]
+                        else:
+                            data[key] = lookup_key_val(secret_data, caller, key)
+                        if data[key] is None:
+                            data[key] = get_input(path)
+
+                        if args.verbose is True:
+                            print(f"Key to write at {value}: '%s'" % data[key])
                     else:
-                        data[key] = getpass.getpass(f"Input a value for '{path}': ")
-                    vault = Vault(args, envs)
-                    vault.vault_write(data[key], path)
-                elif action in COMMANDS ^ {'enc'}:
-                    vault = Vault(args, envs)
-                    vault = vault.vault_read(value, path)
-                    value = vault
-                    data[key] = value
-            for res in dict_walker(value, args, envs, secret_data, path=f"{path}"):
+                        data[key] = get_input(path)
+              #      vault = Vault(args, envs)
+              #      vault.vault_write(data[key], path)
+              #  elif action in COMMANDS ^ {'enc', 'clean'}:
+              #      vault = Vault(args, envs)
+              #      vault = vault.vault_read(value, path)
+              #      value = vault
+              #      data[key] = value
+            if caller is not None:
+                key = caller + '.' + key
+            for res in dict_walker(value, args, envs, secret_data, path=f"{path}", caller=key):
                 yield res
-    elif isinstance(data, list):
-        for item in data:
-            for res in dict_walker(item, args, envs, secret_data, path=f"{path}"):
-                yield res
+    #elif isinstance(data, list):
+    #    for item in data:
+    #        for res in dict_walker(item, args, envs, secret_data, path=f"{path}"):
+    #            yield res
 
 
 def load_secret(args): 
@@ -339,8 +357,7 @@ def main(argv=None):
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         os.system(envs[0] + ' ' + f"{yaml_file}.dec")
     # These Helm commands are only different due to passed variables
-    #elif (action == "install") or (action == "template") or (action == "upgrade") or (action == "lint") or (action == "diff"):
-    elif action in COMMANDS ^ {'enc', 'edit', 'dec', 'view'}:
+    elif action in COMMANDS ^ {'enc', 'edit', 'dec', 'view', 'clean'}:
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         leftovers = ' '.join(leftovers)
 
@@ -351,10 +368,12 @@ def main(argv=None):
 
         cleanup(args)
 
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as ex:
         print(f"ERROR: {ex}")
+        sys.exit(1)
     except SystemExit:
         pass
