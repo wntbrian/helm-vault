@@ -184,10 +184,39 @@ class Vault:
 
     def vault_write(self, value, path):
         mount_point, path, key = self.get_path_and_key(path)
+        payload = {}
+        data = None
+        # TODO: support kv_v2 patch: https://github.com/hvac/hvac/blob/develop/hvac/api/secrets_engines/kv_v2.py#L124
+        # https://hvac.readthedocs.io/en/stable/usage/secrets_engines/kv_v2.html#patch-existing-secret
+        # There seems to be no "PATCH" in kv_v1: https://github.com/hvac/hvac/blob/develop/hvac/api/secrets_engines/kv_v1.py
+        # This means that just writing to an existing location will overwrite any other existing fields.
+        # Therefore, have to work around this and first read the current data in order to re-commit it.
+        # Possibly for kv_v2 the same has to be done because the PATCH method assumes the secret already exists else it
+        # throws a `hvac.exceptions.InvalidPath` exception. Hence why for now both versions are evaluated here below:
+        if self.kvversion == "v1" or self.kvversion == "v2":
+            try:
+                data = self.secret_client.read_secret(
+                     path=path,
+                     mount_point=mount_point
+                )
+            except hvac.exceptions.InvalidPath:
+                pass
+            except AttributeError:
+                LOG.error(CONFIG_ERR_MSG)
+                sys.exit(1)
+            except Exception as ex:
+                LOG.error(f"{ex}")
+                sys.exit(1)
+
+        if data is not None and 'data' in data:
+            payload = data['data']
+
+        payload[key] = value
+        LOG.debug(f"Payload to send to Vault API: {payload}")
         try:
             self.secret_client.create_or_update_secret(
                 path=f"{path}",
-                secret={key: value},
+                secret=payload,
                 mount_point=mount_point
             )
             LOG.debug(f"Wrote '{value}' to: {mount_point}/{path}/{key}")
@@ -197,6 +226,7 @@ class Vault:
         except Exception as ex:
             LOG.error(f"{ex}")
             sys.exit(1)
+
 
     def vault_read(self, value, path):
         mount_point, path, key = self.get_path_and_key(path)
@@ -329,8 +359,8 @@ def main(argv=None):
     yaml.preserve_quotes = True
     secret_data = load_secret(args) if args.action == 'enc' else None
 
-    for path, key, value in dict_walker(data, args, envs, secret_data):
-        print("{path} {key} {value}")
+    for _ in dict_walker(data, args, envs, secret_data):
+        pass
 
     if action == "dec":
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
@@ -357,10 +387,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as ex:
-        sys.stderr.write(f"ERROR: {ex}\n")
-        sys.exit(1)
-    except SystemExit:
-        pass
+    main()
