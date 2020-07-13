@@ -7,6 +7,7 @@ import argparse
 RawTextHelpFormatter = argparse.RawTextHelpFormatter
 import glob
 import getpass
+import logging
 import platform
 import subprocess
 import ruamel.yaml
@@ -15,7 +16,6 @@ check_call = subprocess.check_call
 
 if sys.version_info[:2] < (3, 7):
     raise Exception("Python 3.7 or a more recent version is required.")
-
 
 COMMANDS = frozenset({'template',
                       'edit',
@@ -27,8 +27,8 @@ COMMANDS = frozenset({'template',
                       'lint',
                       'dec',
                       'enc'})
-
 CONFIG_ERR_MSG = 'Vault not configured correctly, check VAULT_ADDR and VAULT_TOKEN env variables.'
+LOG = logging.getLogger(__name__)
 
 
 def parse_args(args):
@@ -54,8 +54,8 @@ def parse_args(args):
     decrypt.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
 
     # Clean help
-    clean = subparsers.add_parser("clean", help="Remove decrypted files (in the current directory)")
-    clean.add_argument("-f", "--file", type=str, help="The specific YAML file to be deleted, without .dec", dest="yaml_file")
+    clean = subparsers.add_parser("clean", help="Remove decrypted files (*.yaml.dec in the current directory)")
+    clean.add_argument("-v", "--verbose", help="Verbose logs", const=True, nargs="?")
 
     # View Help
     view = subparsers.add_parser("view", help="View decrypted YAML file")
@@ -97,8 +97,24 @@ def parse_args(args):
                            help="Verbose logs",
                            const=True,
                            nargs="?")
+        param.add_argument("-x", "--helm-bin",
+                           help="Helm's binary path. Default %(default)s",
+                           default="/usr/local/bin/helm",
+                           type=str)
 
     return parser
+
+
+def set_logger(verbose):
+    fh = logging.StreamHandler()
+    formatter = logging.Formatter('[%(levelname)s] %(message)s')
+    fh.setFormatter(formatter)
+    LOG.addHandler(fh)
+
+    if verbose is True:
+        LOG.setLevel(logging.DEBUG)
+    else:
+        LOG.setLevel(logging.INFO)
 
 
 class Envs:
@@ -109,39 +125,29 @@ class Envs:
 
         if "EDITOR" in os.environ:
             editor=os.environ["EDITOR"]
-            if self.args.verbose is True:
-                print("The env editor is: " + editor)
         else:
             try:
                 editor = self.args.edit
-                if self.args.verbose is True:
-                    print("The editor is: " + editor)
             except AttributeError:
                 if platform.system() != "Windows":
                     editor = "vi"
-                    if self.args.verbose is True:
-                        print("The default editor is: " + editor)
                 else:
                     editor = "notepad"
-                    if self.args.verbose is True:
-                        print("The default editor is: " + editor)
             except Exception as ex:
-                print(f"Error: {ex}")
+                LOG.error(f"{ex}")
+                sys.exit(1)
+
+        LOG.debug("The env editor is: " + editor)
 
         if "KVVERSION" in os.environ:
-            kvversion=os.environ["KVVERSION"]
-            if self.args.verbose is True:
-                print("The env kvversion is: " + kvversion)
+            kvversion = os.environ["KVVERSION"]
         else:
             if self.args.kvversion:
                 kvversion = self.args.kvversion
-                if self.args.verbose is True:
-                    print("The kvversion is: " + kvversion)
             else:
                 kvversion = "v1"
-                if self.args.verbose is True:
-                    print("The default kvversion is: " + kvversion)
 
+        LOG.debug("The kvversion is: " + kvversion)
         return editor, kvversion
 
 
@@ -156,10 +162,10 @@ class Vault:
             self.client = hvac.Client(url=os.environ["VAULT_ADDR"],
                                       token=os.environ["VAULT_TOKEN"])
         except KeyError:
-            print(CONFIG_ERR_MSG)
+            LOG.fatal(CONFIG_ERR_MSG)
             sys.exit(1)
         except Exception as ex:
-            print(f"ERROR: {ex}")
+            LOG.error(f"{ex}")
             sys.exit(1)
 
         if self.kvversion == "v1":
@@ -167,7 +173,7 @@ class Vault:
         elif self.kvversion == "v2":
             self.secret_client = self.client.secrets.kv.v2
         else:
-            print("Wrong KV Version specified, either v1 or v2")
+            LOG.error("Wrong KV Version specified, either v1 or v2")
             sys.exit(1)
 
     def get_path_and_key(self, path):
@@ -184,13 +190,13 @@ class Vault:
                 secret={key: value},
                 mount_point=mount_point
             )
-            if self.args.verbose is True:
-                print(f"Wrote '{value}' to: {mount_point}{path}/{key}")
+            LOG.debug(f"Wrote '{value}' to: {mount_point}/{path}/{key}")
         except AttributeError:
-            print(CONFIG_ERR_MSG)
+            LOG.error(CONFIG_ERR_MSG)
             sys.exit(1)
         except Exception as ex:
-            print(f"Error: {ex}")
+            LOG.error(f"{ex}")
+            sys.exit(1)
 
     def vault_read(self, value, path):
         mount_point, path, key = self.get_path_and_key(path)
@@ -201,20 +207,20 @@ class Vault:
                 mount_point=mount_point
             )
             if 'data' not in value:
-                raise Exception("Cannot find path or read secret")
+                LOG.error("Cannot find path or read secret")
+                sys.exit(1)
             elif key not in value['data']:
-                raise Exception(f"Cannot find key '{key}' in secret's path")
+                LOG.error(f"Cannot find key '{key}' in secret's path")
+                sys.exit(1)
             secret = value.get("data", {}).get(key)
-            if self.args.verbose is True:
-                print(f"Got '{secret}' from: {mount_point}{path}{key}")
+            LOG.debug(f"Got '{secret}' from: {mount_point}/{path}{key}")
             return secret
         except AttributeError:
-            print(CONFIG_ERR_MSG)
+            LOG.error(CONFIG_ERR_MSG)
             sys.exit(1)
         except Exception as ex:
-            print(f"Error: {ex}")
-        except Exception as ex:
-            print(f"ERROR: {ex}")
+            LOG.error(f"{ex}")
+            sys.exit(1)
 
 
 def load_yaml(yaml_file):
@@ -228,43 +234,19 @@ def load_yaml(yaml_file):
 
 def cleanup(args):
     # Cleanup decrypted files
-    yaml_file = args.yaml_file
-    try:
-        os.remove(f"{yaml_file}.dec")
-        if args.verbose is True:
-            print(f"Deleted {yaml_file}.dec")
-            sys.exit()
-    except AttributeError:
-        for fl in glob.glob("*.dec"):
-            os.remove(fl)
-            if args.verbose is True:
-                print(f"Deleted {fl}")
-                sys.exit()
-    except Exception as ex:
-        print(f"Error: {ex}")
-    else:
-        sys.exit()
-
-# Get value from a nested hash structure given a path of key names
-# For example:
-# secret_data['mysql']['password'] = "secret"
-# value_from_path(secret_data, "/mysql/password") => returns "secret"
-def value_from_secret_data(secret_data, path):
-    val = secret_data
-    for key in path.split('/'):
-        if not key:
-            continue
-        if key in val.keys():
-            val = val[key]
-        else:
-            raise Exception(f"Missing secret value. Key {key} does not exist when retrieving value for '{path}'")
-    return val
+    file_list = glob.glob("*.yaml.dec")
+    for f in file_list:
+        try:
+            os.remove(f)
+            sys.stderr.write(f"Deleted {f}\n")
+        except Exception as ex:
+            sys.stderr.write(f"Error deleting {f}: {ex}\n")
 
 
 def lookup_key_val(pos, caller, key, i=0):
     for l in caller.split('.')[i:]:
         if l not in pos:
-            print(f"Warning: cannot find '{l}' in the .yaml.dec file! Input manually or Ctrl-c to exit.")
+            LOG.warning(f"Warning: cannot find '{l}' in the .yaml.dec file! Input manually or Ctrl-c to exit.")
             return None
         if key in pos[l]:
             return pos[l][key]
@@ -285,8 +267,7 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
             if m := re.match(r'vault_secret\([\'"](.*?)[\'"]\)', str(value)):
                 path = m.group(1)
 
-                if args.verbose is True:
-                    print(f"Found key/value to process: {key}={value}")
+                LOG.debug(f"Found key/value to process: {key}={value}")
 
                 if action == "enc":
                     if secret_data:
@@ -297,31 +278,31 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
                         if data[key] is None:
                             data[key] = get_input(path)
 
-                        if args.verbose is True:
-                            print(f"Key to write at {value}: '%s'" % data[key])
+                        LOG.debug(f"Key to write at {value}: '%s'" % data[key])
                     else:
                         data[key] = get_input(path)
-              #      vault = Vault(args, envs)
-              #      vault.vault_write(data[key], path)
-              #  elif action in COMMANDS ^ {'enc', 'clean'}:
-              #      vault = Vault(args, envs)
-              #      vault = vault.vault_read(value, path)
-              #      value = vault
-              #      data[key] = value
+                    vault = Vault(args, envs)
+                    vault.vault_write(data[key], path)
+                elif action in COMMANDS ^ {'enc', 'clean'}:
+                    vault = Vault(args, envs)
+                    vault = vault.vault_read(value, path)
+                    value = vault
+                    data[key] = value
             if caller is not None:
                 key = caller + '.' + key
             for res in dict_walker(value, args, envs, secret_data, path=f"{path}", caller=key):
                 yield res
-    #elif isinstance(data, list):
-    #    for item in data:
-    #        for res in dict_walker(item, args, envs, secret_data, path=f"{path}"):
-    #            yield res
+    elif isinstance(data, list):
+        for item in data:
+            for res in dict_walker(item, args, envs, secret_data, path=f"{path}"):
+                yield res
 
 
 def load_secret(args): 
     if args.secret_file:
         if not re.search(r'\.yaml\.dec$', args.secret_file):
-            raise Exception(f"ERROR: Secret file name must end with \".yaml.dec\". {args.secret_file} was given instead.")
+            LOG.fatal(f"ERROR: Secret file name must end with \".yaml.dec\". {args.secret_file} was given instead.")
+            sys.exit(1)
         return load_yaml(args.secret_file)
 
 
@@ -332,12 +313,15 @@ def main(argv=None):
     parsed = parse_args(argv)
     args, leftovers = parsed.parse_known_args(argv)
 
-    yaml_file = args.yaml_file
-    data = load_yaml(yaml_file)
-    action = args.action
+    set_logger(args.verbose)
 
+    action = args.action
     if action == "clean":
         cleanup(args)
+        sys.exit()
+
+    yaml_file = args.yaml_file
+    data = load_yaml(yaml_file)
 
     envs = Envs(args)
     envs = envs.get_envs()
@@ -346,11 +330,11 @@ def main(argv=None):
     secret_data = load_secret(args) if args.action == 'enc' else None
 
     for path, key, value in dict_walker(data, args, envs, secret_data):
-        print("Done")
+        print("{path} {key} {value}")
 
     if action == "dec":
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
-        print("Done Decrypting")
+        LOG.info("Done Decrypting")
     elif action == "view":
         yaml.dump(data, sys.stdout)
     elif action == "edit":
@@ -362,9 +346,12 @@ def main(argv=None):
         leftovers = ' '.join(leftovers)
 
         try:
-            subprocess.run(f"helm {args.action} {leftovers} -f {yaml_file}.dec", shell=True)
+            subprocess.run(f"{args.helm_bin} {args.action} {leftovers} -f {yaml_file}.dec", shell=True)
         except Exception as ex:
-            print(f"Error: {ex}")
+            LOG.error(f"{ex}")
+            sys.exit(1)
+        else:
+            LOG.info("Done, cleaning up...")
 
         cleanup(args)
 
@@ -373,7 +360,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as ex:
-        print(f"ERROR: {ex}")
+        sys.stderr.write(f"ERROR: {ex}\n")
         sys.exit(1)
     except SystemExit:
         pass
