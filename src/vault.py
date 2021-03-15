@@ -72,7 +72,7 @@ def parse_args(args):
 
     # Template Help
     template = subparsers.add_parser("template", help="Wrapper that decrypts YAML files before running helm template")
-    template.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
+    template.add_argument("-f", "--values", default='values.yaml', type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
 
     # Upgrade Help
     upgrade = subparsers.add_parser("upgrade", help="Wrapper that decrypts YAML files before running helm upgrade")
@@ -101,7 +101,10 @@ def parse_args(args):
                            help="Helm's binary path. Default %(default)s",
                            default="/usr/local/bin/helm",
                            type=str)
-
+        param.add_argument("-p", "--set",
+                           action='append',
+                           help="Helm's overrides",
+                           type=str)
     return parser
 
 
@@ -114,7 +117,7 @@ def set_logger(verbose):
     if verbose is True:
         LOG.setLevel(logging.DEBUG)
     else:
-        LOG.setLevel(logging.CRITICAL)
+        LOG.setLevel(logging.INFO)
 
 
 class Envs:
@@ -301,7 +304,7 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
     action = args.action
     if isinstance(data, dict):
         for key, value in data.items():
-            m = re.match(r'vault_secret\([\'"](.*?)[\'"]\)', str(value))
+            m = re.match(r'vault_secret_(.*?)_$', str(value))
             if m:
                 path = m.group(1)
 
@@ -335,6 +338,26 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
             for res in dict_walker(item, args, envs, secret_data, path=f"{path}"):
                 yield res
 
+
+def args_walker(args, envs):
+
+    action = args.action
+    if isinstance(args.set, list):
+        for i in range(len(args.set)):
+            key, value = args.set[i].split('=')
+            m = re.match(r'vault_secret_(.*?)_$', str(value))
+            if m:
+                path = m.group(1)
+
+                LOG.debug(f"Found key/value to process: {key}={value}")
+
+                if action in COMMANDS ^ {'enc', 'clean'}:
+                    vault = Vault(args, envs)
+                    vault = vault.vault_read(value, path)
+                    value = vault
+                    args.set[i] = f"{key}={value}"
+            print(f"{args.set[i]}")
+            yield i
 
 def load_secret(args): 
     if args.secret_file:
@@ -370,6 +393,9 @@ def main(argv=None):
     for _ in dict_walker(data, args, envs, secret_data):
         pass
 
+    for _ in args_walker(args, envs):
+        pass
+
     if action == "dec":
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         LOG.info("Done Decrypting")
@@ -382,9 +408,15 @@ def main(argv=None):
     elif action in COMMANDS ^ {'enc', 'edit', 'dec', 'view', 'clean'}:
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         leftovers = ' '.join(leftovers)
+        if (args.set):
+            helm_params = '--set '+','.join(args.set)
+        else:
+            helm_params = ""
 
         try:
-            subprocess.run(f"{args.helm_bin} {args.action} {leftovers} -f {yaml_file}.dec", shell=True)
+            subprocess.run(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec", shell=True)
+
+            LOG.debug(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec")
         except Exception as ex:
             LOG.error(f"{ex}")
             sys.exit(1)
