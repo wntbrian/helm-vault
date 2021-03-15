@@ -117,7 +117,7 @@ def set_logger(verbose):
     if verbose is True:
         LOG.setLevel(logging.DEBUG)
     else:
-        LOG.setLevel(logging.INFO)
+        LOG.setLevel(logging.CRITICAL)
 
 
 class Envs:
