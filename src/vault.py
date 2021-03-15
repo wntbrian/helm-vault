@@ -356,7 +356,6 @@ def args_walker(args, envs):
                     vault = vault.vault_read(value, path)
                     value = vault
                     args.set[i] = f"{key}={value}"
-            print(f"{args.set[i]}")
             yield i
 
 def load_secret(args): 
