@@ -114,7 +114,7 @@ def set_logger(verbose):
     if verbose is True:
         LOG.setLevel(logging.DEBUG)
     else:
-        LOG.setLevel(logging.INFO)
+        LOG.setLevel(logging.CRITICAL)
 
 
 class Envs:
@@ -264,13 +264,20 @@ def load_yaml(yaml_file):
 
 def cleanup(args):
     # Cleanup decrypted files
-    file_list = glob.glob("*.yaml.dec")
-    for f in file_list:
-        try:
-            os.remove(f)
-            sys.stderr.write(f"Deleted {f}\n")
-        except Exception as ex:
-            sys.stderr.write(f"Error deleting {f}: {ex}\n")
+    yaml_file = args.yaml_file
+    try:
+        os.remove(f"{yaml_file}.dec")
+        if args.verbose is True:
+            LOG.info(f"Deleted {yaml_file}.dec")
+            sys.exit()
+    except AttributeError:
+        for fl in glob.glob("*.dec"):
+            os.remove(fl)
+            if args.verbose is True:
+                LOG.info(f"Deleted {fl}")
+                sys.exit()
+    except Exception as ex:
+        sys.stderr.write(f"Error deleting: {ex}\n")
 
 
 def lookup_key_val(pos, caller, key, i=0):
@@ -294,7 +301,8 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
     action = args.action
     if isinstance(data, dict):
         for key, value in data.items():
-            if m := re.match(r'vault_secret\([\'"](.*?)[\'"]\)', str(value)):
+            m = re.match(r'vault_secret\([\'"](.*?)[\'"]\)', str(value))
+            if m:
                 path = m.group(1)
 
                 LOG.debug(f"Found key/value to process: {key}={value}")
