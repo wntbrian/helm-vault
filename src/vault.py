@@ -344,7 +344,7 @@ def args_walker(args, envs):
     action = args.action
     if isinstance(args.set, list):
         for i in range(len(args.set)):
-            key, value = args.set[i].split('=')
+            key, value = args.set[i].split('=', 1)
             m = re.match(r'vault_secret_(.*?)_$', str(value))
             if m:
                 path = m.group(1)

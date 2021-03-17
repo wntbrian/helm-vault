@@ -1,0 +1,12 @@
+config:
+  datasource:
+    spring_datasource_url: jdbc:postgresql://cloud-pg01-dev.esphere.local:5432/print_adapter
+    spring_datasource_password: vault_secret_secret/data/service/password_
+    spring_datasource_username: vault_secret_secret/data/service/username_
+
+probe_path: /actuator/health/ping
+
+
+
+
+
