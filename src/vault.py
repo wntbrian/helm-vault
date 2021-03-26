@@ -4,6 +4,7 @@ import re
 import sys
 import hvac
 import argparse
+
 RawTextHelpFormatter = argparse.RawTextHelpFormatter
 import glob
 import getpass
@@ -11,8 +12,10 @@ import logging
 import platform
 import subprocess
 import ruamel.yaml
-check_call = subprocess.check_call
+import shlex
+import base64
 
+check_call = subprocess.check_call
 
 if sys.version_info[:2] < (3, 7):
     raise Exception("Python 3.7 or a more recent version is required.")
@@ -34,7 +37,7 @@ LOG = logging.getLogger(__name__)
 def parse_args(args):
     # Help text
     parser = argparse.ArgumentParser(description=
-    """Store secrets from Helm in Vault
+                                     """Store secrets from Helm in Vault
 
     Required Environment Variables:
 
@@ -47,7 +50,8 @@ def parse_args(args):
     # Encrypt help
     encrypt = subparsers.add_parser("enc", help="Parse a YAML file and store user entered data in Vault")
     encrypt.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
-    encrypt.add_argument("-s", "--secret-file", type=str, help="File containing the secret for input. Must end in .yaml.dec")
+    encrypt.add_argument("-s", "--secret-file", type=str,
+                         help="File containing the secret for input. Must end in .yaml.dec")
 
     # Decrypt help
     decrypt = subparsers.add_parser("dec", help="Parse a YAML file and retrieve values from Vault")
@@ -64,27 +68,33 @@ def parse_args(args):
     # Edit Help
     edit = subparsers.add_parser("edit", help="Edit decrypted YAML file. DOES NOT CLEAN UP AUTOMATICALLY.")
     edit.add_argument("yaml_file", type=str, help="The YAML file to be worked on")
-    edit.add_argument("-e", "--editor", help='Editor name. Default: (Linux/MacOS) "vi" (Windows) "notepad"', const=True, nargs="?")
+    edit.add_argument("-e", "--editor", help='Editor name. Default: (Linux/MacOS) "vi" (Windows) "notepad"', const=True,
+                      nargs="?")
 
     # Install Help
     install = subparsers.add_parser("install", help="Wrapper that decrypts YAML files before running helm install")
-    install.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
+    install.add_argument("-f", "--values", type=str, dest="yaml_file",
+                         help="The encrypted YAML file to decrypt on the fly")
 
     # Template Help
     template = subparsers.add_parser("template", help="Wrapper that decrypts YAML files before running helm template")
-    template.add_argument("-f", "--values", default='values.yaml', type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
+    template.add_argument("-f", "--values", default='values.yaml', type=str, dest="yaml_file",
+                          help="The encrypted YAML file to decrypt on the fly")
 
     # Upgrade Help
     upgrade = subparsers.add_parser("upgrade", help="Wrapper that decrypts YAML files before running helm upgrade")
-    upgrade.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
+    upgrade.add_argument("-f", "--values", type=str, dest="yaml_file",
+                         help="The encrypted YAML file to decrypt on the fly")
 
     # Lint Help
     lint = subparsers.add_parser("lint", help="Wrapper that decrypts YAML files before running helm link")
-    lint.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
+    lint.add_argument("-f", "--values", type=str, dest="yaml_file",
+                      help="The encrypted YAML file to decrypt on the fly")
 
     # Diff Help
     diff = subparsers.add_parser("diff", help="Wrapper that decrypts YAML files before running helm diff")
-    diff.add_argument("-f", "--values", type=str, dest="yaml_file", help="The encrypted YAML file to decrypt on the fly")
+    diff.add_argument("-f", "--values", type=str, dest="yaml_file",
+                      help="The encrypted YAML file to decrypt on the fly")
 
     # Add -kv argument to each one of these
     for param in [diff, lint, upgrade, template, install, edit, view, decrypt, encrypt]:
@@ -117,7 +127,7 @@ def set_logger(verbose):
     if verbose is True:
         LOG.setLevel(logging.DEBUG)
     else:
-        LOG.setLevel(logging.CRITICAL)
+        LOG.setLevel(logging.ERROR)
 
 
 class Envs:
@@ -127,7 +137,7 @@ class Envs:
     def get_envs(self):
 
         if "EDITOR" in os.environ:
-            editor=os.environ["EDITOR"]
+            editor = os.environ["EDITOR"]
         else:
             try:
                 editor = self.args.edit
@@ -199,8 +209,8 @@ class Vault:
         if self.kvversion == "v1" or self.kvversion == "v2":
             try:
                 data = self.secret_client.read_secret(
-                     path=path,
-                     mount_point=mount_point
+                    path=path,
+                    mount_point=mount_point
                 )
             except hvac.exceptions.InvalidPath:
                 pass
@@ -229,7 +239,6 @@ class Vault:
         except Exception as ex:
             LOG.error(f"{ex}")
             sys.exit(1)
-
 
     def vault_read(self, value, path):
         mount_point, path, key = self.get_path_and_key(path)
@@ -290,7 +299,7 @@ def lookup_key_val(pos, caller, key, i=0):
             return None
         if key in pos[l]:
             return pos[l][key]
-        return lookup_key_val(pos[l], caller, key, i+1)
+        return lookup_key_val(pos[l], caller, key, i + 1)
 
 
 def get_input(path):
@@ -298,7 +307,6 @@ def get_input(path):
 
 
 def dict_walker(data, args, envs, secret_data, path=None, caller=None):
-
     # Walk through the loaded dicts looking for the values we want
     path = path if path is not None else ""
     action = args.action
@@ -340,7 +348,7 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
 
 
 def args_walker(args, envs):
-
+    ### TODO Переработать метод в генерацию файлы values.yml
     action = args.action
     if isinstance(args.set, list):
         for i in range(len(args.set)):
@@ -355,10 +363,12 @@ def args_walker(args, envs):
                     vault = Vault(args, envs)
                     vault = vault.vault_read(value, path)
                     value = vault
-                    args.set[i] = f"{key}={value}"
+                    args.set[i] = f"--set {key}={base64.b64encode(value.encode('ascii'))}"
+
             yield i
 
-def load_secret(args): 
+
+def load_secret(args):
     if args.secret_file:
         if not re.search(r'\.yaml\.dec$', args.secret_file):
             LOG.fatal(f"ERROR: Secret file name must end with \".yaml.dec\". {args.secret_file} was given instead.")
@@ -367,7 +377,6 @@ def load_secret(args):
 
 
 def main(argv=None):
-
     # Parse arguments from argparse
     # This is outside of the parse_arg function because of issues returning multiple named values from a function
     parsed = parse_args(argv)
@@ -408,14 +417,21 @@ def main(argv=None):
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         leftovers = ' '.join(leftovers)
         if (args.set):
-            helm_params = '--set '+','.join(args.set)
+            helm_params = ' '.join(args.set)
         else:
             helm_params = ""
 
-        try:
-            subprocess.run(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec", shell=True)
+        command = f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec"
+        print(command)
+        execute_com = shlex.split(command, posix=True)
 
-            LOG.debug(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec")
+        try:
+            LOG.debug(execute_com)
+            p = subprocess.Popen(execute_com)
+            result  = p.communicate()
+            #print(result)
+            #subprocess.run(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec", shell=True)
+
         except Exception as ex:
             LOG.error(f"{ex}")
             sys.exit(1)
