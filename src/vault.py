@@ -364,6 +364,8 @@ def args_walker(args, envs):
                     vault = vault.vault_read(value, path)
                     value = vault
                     args.set[i] = f"--set {key}={base64.b64encode(value.encode('ascii'))}"
+            else:
+                args.set[i] = f"--set {key}={value}"
 
             yield i
 
@@ -422,7 +424,6 @@ def main(argv=None):
             helm_params = ""
 
         command = f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec"
-        print(command)
         execute_com = shlex.split(command, posix=True)
 
         try:
