@@ -363,7 +363,11 @@ def args_walker(args, envs):
                     vault = Vault(args, envs)
                     vault = vault.vault_read(value, path)
                     value = vault
-                    args.set[i] = f"--set {key}={str(base64.b64encode(value.encode('utf-8')), 'utf-8')}"
+                    file_filter = re.match(r'config\.files\.(.*?)', str(key))
+                    if file_filter:
+                        args.set[i] = f"--set {key}={value}"
+                    else:
+                        args.set[i] = f"--set {key}={str(base64.b64encode(value.encode('utf-8')), 'utf-8')}"
             else:
                 args.set[i] = f"--set {key}={value}"
 
