@@ -264,6 +264,24 @@ class Vault:
             LOG.error(f"{ex}")
             sys.exit(1)
 
+    def vault_walk(self, path):
+        mount_point, path, key = self.get_path_and_key(path)
+        path += "/"+key
+
+        try:
+            read_secret_result = self.secret_client.read_secret(
+                path=path,
+                mount_point=mount_point,
+            )
+            LOG.debug(f"Got 'secrets from: {mount_point}/{path}{key}")
+            return read_secret_result['data']
+        except AttributeError:
+            LOG.error(CONFIG_ERR_MSG)
+            return None
+        except Exception as ex:
+            LOG.error(f"{ex}")
+            return None
+
 
 def load_yaml(yaml_file):
     # Load the YAML file
@@ -276,20 +294,24 @@ def load_yaml(yaml_file):
 
 def cleanup(args):
     # Cleanup decrypted files
-    yaml_file = args.yaml_file
+    if isinstance(args, str):
+        yaml_file = args
+        verb = False
+    else:
+        yaml_file = args.yaml_file + ".dec"
+        verb = args.verbose
     try:
-        os.remove(f"{yaml_file}.dec")
-        if args.verbose is True:
-            LOG.info(f"Deleted {yaml_file}.dec")
-            sys.exit()
+        os.remove(f"{yaml_file}")
+        if verb is True:
+            LOG.info(f"Deleted {yaml_file}")
     except AttributeError:
         for fl in glob.glob("*.dec"):
             os.remove(fl)
-            if args.verbose is True:
+            if verb is True:
                 LOG.info(f"Deleted {fl}")
-                sys.exit()
     except Exception as ex:
         sys.stderr.write(f"Error deleting: {ex}\n")
+
 
 
 def lookup_key_val(pos, caller, key, i=0):
@@ -347,31 +369,44 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
                 yield res
 
 
-def args_walker(args, envs):
+def args_walker(args, envs, vault_vars):
     ### TODO Переработать метод в генерацию файлы values.yml
     action = args.action
     if isinstance(args.set, list):
         for i in range(len(args.set)):
             key, value = args.set[i].split('=', 1)
-            m = re.match(r'vault_secret_(.*?)_$', str(value))
-            if m:
-                path = m.group(1)
+            if key.split('.')[-1] not in vault_vars:
+                m = re.match(r'vault_secret_(.*?)_$', str(value))
+                if m:
+                    path = m.group(1)
 
-                LOG.debug(f"Found key/value to process: {key}={value}")
+                    LOG.debug(f"Found key/value to process: {key}={value}")
 
-                if action in COMMANDS ^ {'enc', 'clean'}:
-                    vault = Vault(args, envs)
-                    vault = vault.vault_read(value, path)
-                    value = vault
-                    file_filter = re.match(r'config\.files\.(.*?)', str(key))
-                    if file_filter:
-                        args.set[i] = f"--set {key}={value}"
-                    else:
+                    if action in COMMANDS ^ {'enc', 'clean'}:
+                        vault = Vault(args, envs)
+                        vault = vault.vault_read(value, path)
+                        value = vault
+                        # file_filter = re.match(r'config\.files\.(.*?)', str(key))
+                        # if file_filter:
+                        #     args.set[i] = f"--set {key}={value}"
+                        # else:
                         args.set[i] = f"--set {key}={str(base64.b64encode(value.encode('utf-8')), 'utf-8')}"
+                else:
+                    args.set[i] = f"--set {key}={value}"
             else:
-                args.set[i] = f"--set {key}={value}"
+                del args.set[i]
+                LOG.debug(f"Delete dublicate key: {key}")
 
             yield i
+
+
+def vault_walker(path, args, envs):
+    vault = Vault(args, envs)
+    vault_vars = vault.vault_walk(path)
+    if vault_vars is not None:
+        for key,value in vault_vars.items():
+            vault_vars[key] = str(base64.b64encode(value.encode('utf-8')), 'utf-8')
+    return vault_vars
 
 
 def load_secret(args):
@@ -407,7 +442,18 @@ def main(argv=None):
     for _ in dict_walker(data, args, envs, secret_data):
         pass
 
-    for _ in args_walker(args, envs):
+    p = 'cloud/koruscloud/services/crypto-profile/alt'
+    vault_dict = {'config': {'vault': {}}}
+    vault_dict['config']['vault'] = vault_walker(p, args, envs)
+    vault_file = ""
+    if vault_dict['config']['vault'] is not None:
+        vault_file = "vault.yml"
+        vault_yml = ruamel.yaml.YAML()
+        vault_yml.preserve_quotes = True
+        vault_yml.indent(mapping=2)
+        vault_yml.dump(vault_dict, open(vault_file, "w"))
+
+    for _ in args_walker(args, envs, vault_dict['config']['vault']):
         pass
 
     if action == "dec":
@@ -423,11 +469,16 @@ def main(argv=None):
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         leftovers = ' '.join(leftovers)
         if (args.set):
+
             helm_params = ' '.join(args.set)
         else:
             helm_params = ""
+        vault_file_cmd = ""
+        if vault_file != "":
+            vault_file_cmd = f"-f {vault_file}"
 
-        command = f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec"
+
+        command = f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec {vault_file_cmd}"
         execute_com = shlex.split(command, posix=True)
 
         try:
@@ -443,8 +494,9 @@ def main(argv=None):
         else:
             LOG.info("Done, cleaning up...")
 
+        cleanup(vault_file)
         cleanup(args)
-
+        sys.exit()
 
 if __name__ == "__main__":
     main()
