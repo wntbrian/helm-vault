@@ -450,8 +450,9 @@ def main(argv=None):
         pass
 
     vault_dict = {'config': {'vault': {}}}
-    if 'argocd_vault_path' in arg_dict and isinstance(arg_dict['argocd_vault_path'], str):
-        vault_dict['config']['vault'] = vault_walker(arg_dict['argocd_vault_path'], args, envs)
+    if 'argocd_vault_path' in arg_dict and isinstance(arg_dict['argocd_vault_path'], str) \
+            and 'stage' in arg_dict and isinstance(arg_dict['stage'], str):
+        vault_dict['config']['vault'] = vault_walker(f"{arg_dict['argocd_vault_path']}/{arg_dict['stage']}", args, envs)
 
 
     if action == "dec":
