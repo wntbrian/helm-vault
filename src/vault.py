@@ -313,7 +313,6 @@ def cleanup(args):
         sys.stderr.write(f"Error deleting: {ex}\n")
 
 
-
 def lookup_key_val(pos, caller, key, i=0):
     for l in caller.split('.')[i:]:
         if l not in pos:
@@ -326,6 +325,15 @@ def lookup_key_val(pos, caller, key, i=0):
 
 def get_input(path):
     return getpass.getpass(f"Input a value for '{path}': ")
+
+
+def add_branch(tree, vector, value):
+    key = vector[0]
+    if len(vector) == 1:
+        tree[key] = value
+    else:
+        tree[key] = add_branch(tree[key] if key in tree else {}, vector[1:], value)
+    return tree
 
 
 def dict_walker(data, args, envs, secret_data, path=None, caller=None):
@@ -369,33 +377,28 @@ def dict_walker(data, args, envs, secret_data, path=None, caller=None):
                 yield res
 
 
-def args_walker(args, envs, vault_vars):
-    ### TODO Переработать метод в генерацию файлы values.yml
+def args_walker(args, envs, args_dict):
     action = args.action
     if isinstance(args.set, list):
         for i in range(len(args.set)):
             key, value = args.set[i].split('=', 1)
-            if key.split('.')[-1] not in vault_vars:
-                m = re.match(r'vault_secret_(.*?)_$', str(value))
-                if m:
-                    path = m.group(1)
+            splited_key = key.split('.')
+            m = re.match(r'vault_secret_(.*?)_$', str(value))
+            if m:
+                path = m.group(1)
 
-                    LOG.debug(f"Found key/value to process: {key}={value}")
+                LOG.debug(f"Found key/value to process: {key}={value}")
 
-                    if action in COMMANDS ^ {'enc', 'clean'}:
-                        vault = Vault(args, envs)
-                        vault = vault.vault_read(value, path)
-                        value = vault
-                        # file_filter = re.match(r'config\.files\.(.*?)', str(key))
-                        # if file_filter:
-                        #     args.set[i] = f"--set {key}={value}"
-                        # else:
-                        args.set[i] = f"--set {key}={str(base64.b64encode(value.encode('utf-8')), 'utf-8')}"
-                else:
-                    args.set[i] = f"--set {key}={value}"
+                if action in COMMANDS ^ {'enc', 'clean'}:
+                    vault = Vault(args, envs)
+                    vault = vault.vault_read(value, path)
+                    value = vault
+                    args_dict = add_branch(args_dict, splited_key, str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
             else:
-                del args.set[i]
-                LOG.debug(f"Delete dublicate key: {key}")
+                if len(splited_key) > 1 and (splited_key[0] == "config" and splited_key[-1] != 'mount_path'):
+                    args_dict = add_branch(args_dict, splited_key, str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
+                else:
+                    args_dict = add_branch(args_dict, splited_key, value)
 
             yield i
 
@@ -442,19 +445,15 @@ def main(argv=None):
     for _ in dict_walker(data, args, envs, secret_data):
         pass
 
+    arg_dict = {}
+    for _ in args_walker(args, envs, arg_dict):
+        pass
+
     p = 'cloud/koruscloud/services/crypto-profile/alt'
     vault_dict = {'config': {'vault': {}}}
     vault_dict['config']['vault'] = vault_walker(p, args, envs)
-    vault_file = ""
-    if vault_dict['config']['vault'] is not None:
-        vault_file = "vault.yml"
-        vault_yml = ruamel.yaml.YAML()
-        vault_yml.preserve_quotes = True
-        vault_yml.indent(mapping=2)
-        vault_yml.dump(vault_dict, open(vault_file, "w"))
 
-    for _ in args_walker(args, envs, vault_dict['config']['vault']):
-        pass
+
 
     if action == "dec":
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
@@ -468,17 +467,30 @@ def main(argv=None):
     elif action in COMMANDS ^ {'enc', 'edit', 'dec', 'view', 'clean'}:
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
         leftovers = ' '.join(leftovers)
-        if (args.set):
 
-            helm_params = ' '.join(args.set)
+        arg_file = "args.yml"
+        if (arg_dict):
+            yaml.dump(arg_dict, open(f"{arg_file}", "w"))
+            arg_file_cmd = f"-f {arg_file}"
         else:
-            helm_params = ""
-        vault_file_cmd = ""
-        if vault_file != "":
+            arg_file_cmd = ""
+
+        vault_file = "vault.yml"
+        if vault_dict['config']['vault'] is not None:
+            if arg_dict['config']:
+                for _, arg_config in arg_dict['config'].items():
+                    for key in arg_config:
+                        if key in vault_dict['config']['vault']:
+                            del(vault_dict['config']['vault'][key])
+            vault_yml = ruamel.yaml.YAML()
+            vault_yml.preserve_quotes = True
+            vault_yml.indent(mapping=2)
+            vault_yml.dump(vault_dict, open(vault_file, "w"))
             vault_file_cmd = f"-f {vault_file}"
+        else:
+            vault_file_cmd = ""
 
-
-        command = f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec {vault_file_cmd}"
+        command = f"{args.helm_bin} {args.action} {leftovers} -f {yaml_file}.dec {vault_file_cmd} {arg_file_cmd}"
         execute_com = shlex.split(command, posix=True)
 
         try:
@@ -497,6 +509,7 @@ def main(argv=None):
         cleanup(vault_file)
         cleanup(args)
         sys.exit()
+
 
 if __name__ == "__main__":
     main()
