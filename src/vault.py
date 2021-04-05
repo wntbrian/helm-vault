@@ -449,10 +449,9 @@ def main(argv=None):
     for _ in args_walker(args, envs, arg_dict):
         pass
 
-    p = 'cloud/koruscloud/services/crypto-profile/alt'
     vault_dict = {'config': {'vault': {}}}
-    vault_dict['config']['vault'] = vault_walker(p, args, envs)
-
+    if 'argocd_vault_path' in arg_dict and isinstance(arg_dict['argocd_vault_path'], str):
+        vault_dict['config']['vault'] = vault_walker(arg_dict['argocd_vault_path'], args, envs)
 
 
     if action == "dec":
@@ -475,9 +474,9 @@ def main(argv=None):
         else:
             arg_file_cmd = ""
 
-        vault_file = "vault.yml"
-        if vault_dict['config']['vault'] is not None:
-            if arg_dict['config']:
+        vault_file = 'vault.yml'
+        if vault_dict and vault_dict['config']['vault'] is not None:
+            if 'config' in arg_dict:
                 for _, arg_config in arg_dict['config'].items():
                     for key in arg_config:
                         if key in vault_dict['config']['vault']:
