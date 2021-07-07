@@ -32,7 +32,7 @@ COMMANDS = frozenset({'template',
                       'enc'})
 CONFIG_ERR_MSG = 'Vault not configured correctly, check VAULT_ADDR and VAULT_TOKEN env variables.'
 LOG = logging.getLogger(__name__)
-
+PLANEVARS = ['replicaCount']
 
 def parse_args(args):
     # Help text
@@ -393,7 +393,11 @@ def args_walker(args, envs, args_dict):
                     vault = Vault(args, envs)
                     vault = vault.vault_read(value, path)
                     value = vault
-                    args_dict = add_branch(args_dict, splited_key, str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
+                    if splited_key[0] in PLANEVARS:
+                        args_dict = add_branch(args_dict, splited_key, value)
+                    else:
+                        args_dict = add_branch(args_dict, splited_key,
+                                               str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
             else:
                 if len(splited_key) > 1 and (splited_key[0] == "config" and splited_key[-1] != 'mount_path'):
                     args_dict = add_branch(args_dict, splited_key, str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
@@ -495,8 +499,8 @@ def main(argv=None):
 
         try:
             LOG.debug(execute_com)
-            p = subprocess.Popen(execute_com)
-            result  = p.communicate()
+            #p = subprocess.Popen(execute_com)
+            #result  = p.communicate()
             #print(result)
             #subprocess.run(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec", shell=True)
 
