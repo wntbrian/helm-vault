@@ -396,8 +396,11 @@ def args_walker(args, envs, args_dict):
                     if splited_key[0] in PLANEVARS:
                          args_dict = add_branch(args_dict, splited_key, value)
                     else:
-                        args_dict = add_branch(args_dict, splited_key,
-                                               str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
+                        if len(splited_key) > 1 and (splited_key[0] == "config" and splited_key[1] == 'binary'):
+                            args_dict = add_branch(args_dict, splited_key, value)
+                        else:
+                            args_dict = add_branch(args_dict, splited_key,
+                                                   str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
             else:
                 if len(splited_key) > 1 and (splited_key[0] == "config" and splited_key[-1] != 'mount_path'):
                     args_dict = add_branch(args_dict, splited_key, str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
