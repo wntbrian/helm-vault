@@ -499,9 +499,9 @@ def main(argv=None):
 
         try:
             LOG.debug(execute_com)
-            #p = subprocess.Popen(execute_com)
-            #result  = p.communicate()
-            #print(result)
+            p = subprocess.Popen(execute_com)
+            result = p.communicate()
+            print(result)
             #subprocess.run(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec", shell=True)
 
         except Exception as ex:
