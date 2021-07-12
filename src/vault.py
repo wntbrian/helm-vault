@@ -32,7 +32,7 @@ COMMANDS = frozenset({'template',
                       'enc'})
 CONFIG_ERR_MSG = 'Vault not configured correctly, check VAULT_ADDR and VAULT_TOKEN env variables.'
 LOG = logging.getLogger(__name__)
-PLANEVARS = ['replicaCount']
+PLANEVARS = ['replicaCount','binary']
 
 def parse_args(args):
     # Help text
@@ -394,7 +394,7 @@ def args_walker(args, envs, args_dict):
                     vault = vault.vault_read(value, path)
                     value = vault
                     if splited_key[0] in PLANEVARS:
-                        args_dict = add_branch(args_dict, splited_key, value)
+                         args_dict = add_branch(args_dict, splited_key, value)
                     else:
                         args_dict = add_branch(args_dict, splited_key,
                                                str(base64.b64encode(value.encode('utf-8')), 'utf-8'))
