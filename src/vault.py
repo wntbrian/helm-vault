@@ -504,8 +504,8 @@ def main(argv=None):
             LOG.debug(execute_com)
             p = subprocess.Popen(execute_com)
             result = p.communicate()
-            print(result)
-            #subprocess.run(f"{args.helm_bin} {args.action} {helm_params} {leftovers} -f {yaml_file}.dec", shell=True)
+            ## FORLOCALDEBUG
+            #print(result)
 
         except Exception as ex:
             LOG.error(f"{ex}")
