@@ -273,7 +273,7 @@ class Vault:
                 path=path,
                 mount_point=mount_point,
             )
-            LOG.debug(f"Got 'secrets from: {mount_point}/{path}{key}")
+            LOG.debug(f"Got 'secrets from: {mount_point}/{path}")
             return read_secret_result['data']
         except AttributeError:
             LOG.error(CONFIG_ERR_MSG)
@@ -412,10 +412,14 @@ def args_walker(args, envs, args_dict):
 
 def vault_walker(path, args, envs):
     vault = Vault(args, envs)
-    vault_vars = vault.vault_walk(path)
+    if vault.kvversion == "v2":
+        vault_vars = vault.vault_walk(path)['data']
+    else:
+        vault_vars = vault.vault_walk(path)
     if vault_vars is not None:
-        for key,value in vault_vars.items():
+        for key, value in vault_vars.items():
             vault_vars[key] = str(base64.b64encode(value.encode('utf-8')), 'utf-8')
+
     return vault_vars
 
 
