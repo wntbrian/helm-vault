@@ -412,10 +412,13 @@ def args_walker(args, envs, args_dict):
 
 def vault_walker(path, args, envs):
     vault = Vault(args, envs)
-    if vault.kvversion == "v2":
-        vault_vars = vault.vault_walk(path)['data']
-    else:
-        vault_vars = vault.vault_walk(path)
+    # if vault.kvversion == "v2":
+    #     vault_vars = vault.vault_walk(path)['data']
+    # else:
+    vault_vars = vault.vault_walk(path)
+    if 'data' in vault_vars.keys() and 'metadata' in vault_vars.keys():
+        vault_vars = vault_vars['data']
+
     if vault_vars is not None:
         for key, value in vault_vars.items():
             vault_vars[key] = str(base64.b64encode(value.encode('utf-8')), 'utf-8')
