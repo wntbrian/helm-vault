@@ -32,7 +32,7 @@ COMMANDS = frozenset({'template',
                       'enc'})
 CONFIG_ERR_MSG = 'Vault not configured correctly, check VAULT_ADDR and VAULT_TOKEN env variables.'
 LOG = logging.getLogger(__name__)
-PLANEVARS = ['replicaCount','binary']
+PLANEVARS = ['replicaCount','binary', 'resources']
 
 def parse_args(args):
     # Help text
@@ -248,13 +248,19 @@ class Vault:
                 path=path,
                 mount_point=mount_point
             )
+
+
             if 'data' not in value:
                 LOG.error("Cannot find path or read secret")
-                sys.exit(1)
-            elif key not in value['data']:
-                LOG.error(f"Cannot find key '{key}' in secret's path")
-                sys.exit(1)
-            secret = value.get("data", {}).get(key)
+                secret = f"{mount_point}/{path}/{key}"
+            else:
+                if 'data' in value['data'].keys() and 'metadata' in value['data'].keys():
+                    value = value['data']
+                if key not in value['data']:
+                    LOG.error(f"Cannot find key '{key}' in secret's path")
+                    secret = f"{mount_point}/{path}/{key}"
+                else:
+                    secret = value.get("data", {}).get(key)
             LOG.debug(f"Got '{secret}' from: {mount_point}/{path}{key}")
             return secret
         except AttributeError:
@@ -262,7 +268,8 @@ class Vault:
             sys.exit(1)
         except Exception as ex:
             LOG.error(f"{ex}")
-            sys.exit(1)
+            return "None_on_get"
+            #sys.exit(1)
 
     def vault_walk(self, path):
         mount_point, path, key = self.get_path_and_key(path)
