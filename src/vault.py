@@ -109,7 +109,7 @@ def parse_args(args):
                            nargs="?")
         param.add_argument("-x", "--helm-bin",
                            help="Helm's binary path. Default %(default)s",
-                           default="/usr/local/bin/helm",
+                           default="/usr/local/bin/helm.bin",
                            type=str)
         param.add_argument("-p", "--set",
                            action='append',
