@@ -467,7 +467,7 @@ def custom_vault_kube_walker(path, args, envs,args_dict):
 
     if vault_vars is not None:
         for key, value in vault_vars.items():
-            if key.split('_')[0] == "kube":
+            if key.split('__')[0] == "kube":
                 args_dict = add_branch(args_dict, key.split('_')[1:], value)
 
 
