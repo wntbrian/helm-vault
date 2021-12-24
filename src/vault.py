@@ -440,6 +440,36 @@ def load_secret(args):
             sys.exit(1)
         return load_yaml(args.secret_file)
 
+def custom_get_vault_path(args):
+    get_vault_path = []
+    action = args.action
+    if isinstance(args.set, list):
+        # return args.set["argocd_vault_path"]
+        for i in range(len(args.set)):
+            key, value = args.set[i].split('=', 1)
+            if key == "argocd_vault_path":
+                get_vault_path.insert(0, value)
+            if key == "stage":
+                get_vault_path.insert(1, value)
+    list_join = "/"
+    if len(get_vault_path) == 2:
+        # LOG.info("test1 " + "-".join(get_vault_path))
+        return ["0",list_join.join(get_vault_path)]
+    else:
+        # LOG.info("test1 " + "-".join(get_vault_path))
+        return ["1","не удалось получить путь до проекта в vault"]
+
+def custom_vault_kube_walker(path, args, envs,args_dict):
+    vault = Vault(args, envs)
+    vault_vars = vault.vault_walk(path)
+    if 'data' in vault_vars.keys() and 'metadata' in vault_vars.keys():
+        vault_vars = vault_vars['data']
+
+    if vault_vars is not None:
+        for key, value in vault_vars.items():
+            if key.split('_')[0] == "kube":
+                args_dict = add_branch(args_dict, key.split('_')[1:], value)
+
 
 def main(argv=None):
     # Parse arguments from argparse
@@ -470,11 +500,15 @@ def main(argv=None):
     for _ in args_walker(args, envs, arg_dict):
         pass
 
-    vault_dict = {'config': {'vault': {}}}
-    if 'argocd_vault_path' in arg_dict and isinstance(arg_dict['argocd_vault_path'], str) \
-            and 'stage' in arg_dict and isinstance(arg_dict['stage'], str):
-        vault_dict['config']['vault'] = vault_walker(f"{arg_dict['argocd_vault_path']}/{arg_dict['stage']}", args, envs)
+    # vault_dict = {'config': {'vault': {}}}
+    # if 'argocd_vault_path' in arg_dict and isinstance(arg_dict['argocd_vault_path'], str) \
+    #         and 'stage' in arg_dict and isinstance(arg_dict['stage'], str):
+    #     vault_dict['config']['vault'] = vault_walker(f"{arg_dict['argocd_vault_path']}/{arg_dict['stage']}", args, envs)
 
+    vault_dict = {'config': {'vault': {}}}
+    if custom_get_vault_path(args)[0] == "0":
+        custom_vault_kube_walker(custom_get_vault_path(args)[1], args, envs,arg_dict)
+        vault_dict['config']['vault'] = vault_walker(f"{arg_dict['argocd_vault_path']}/{arg_dict['stage']}", args, envs)
 
     if action == "dec":
         yaml.dump(data, open(f"{yaml_file}.dec", "w"))
